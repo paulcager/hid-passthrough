@@ -1,3 +1,6 @@
 [submodule "pio_usb"]
 	path = pio_usb
 	url = https://github.com/sekigon-gonnoc/Pico-PIO-USB.git
+[submodule "cdc_stdio_lib"]
+	path = cdc_stdio_lib
+	url = https://github.com/rppicomidi/cdc_stdio_lib.git

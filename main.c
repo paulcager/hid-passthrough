@@ -6,6 +6,7 @@
 #include "pico/multicore.h"
 #include "bsp/board.h"
 #include "pio_usb.h"
+#include "cdc_stdio_lib.h"
 
 // GPIO mapping
 const uint host_pin_dp = 2;
@@ -36,9 +37,10 @@ tusb_desc_device_t const desc_device = {
     .bLength = sizeof(tusb_desc_device_t),
     .bDescriptorType = TUSB_DESC_DEVICE,
     .bcdUSB = 0x0200,
-    .bDeviceClass = 0x00,
-    .bDeviceSubClass = 0x00,
-    .bDeviceProtocol = 0x00,
+    // Use Interface Association Descriptor (IAD) for CDC
+    .bDeviceClass = TUSB_CLASS_MISC,
+    .bDeviceSubClass = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol = MISC_PROTOCOL_IAD,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
 
     .idVendor = 0xCafe,
@@ -77,15 +79,21 @@ uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
 // Configuration Descriptor
 //--------------------------------------------------------------------+
 
-#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
-#define EPNUM_HID 0x81
+#define CONFIG_TOTAL_LEN (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN)
+#define EPNUM_HID 0x83
+#define EPNUM_CDC_NOTIF 0x81
+#define EPNUM_CDC_OUT 0x02
+#define EPNUM_CDC_IN 0x82
 
 uint8_t const desc_configuration[] = {
     // Config number, interface count, string index, total length, attribute, power in mA
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+    TUD_CONFIG_DESCRIPTOR(1, 3, 0, CONFIG_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+
+    // Interface number, string index, EP notification address and size, EP data address (out, in) and size.
+    TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 
     // Interface number, string index, protocol, report descriptor len, EP In address, size & polling interval
-    TUD_HID_DESCRIPTOR(0, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 10)
+    TUD_HID_DESCRIPTOR(2, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 10)
 };
 
 // Invoked when received GET CONFIGURATION DESCRIPTOR
@@ -105,7 +113,8 @@ char const *string_desc_arr[] = {
     (char[]){0x09, 0x04}, // 0: is supported language is English (0x0409)
     "TinyUSB",            // 1: Manufacturer
     "HID-Proxy",          // 2: Product
-    "123456",             // 3: Serials, should use chip ID
+    "914784",             // 3: Serials, should use chip ID
+    "TinyUSB CDC",        // 4: CDC Interface
 };
 
 static uint16_t _desc_str[32];
@@ -146,11 +155,18 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 
 int main(void) {
     board_init();
-    stdio_init_all();
-    multicore_launch_core1(core1_main);
+
+    // Initialize TinyUSB device stack before stdio
     tusb_init();
 
+    // Initialize USB CDC stdio (for debugging)
+    cdc_stdio_lib_init();
+
+    stdio_init_all();
+
     printf("USB HID proxy\n");
+
+    multicore_launch_core1(core1_main);
 
     while (true) {
         tud_task();

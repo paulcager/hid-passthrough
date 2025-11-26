@@ -13,6 +13,7 @@ add_executable(hid_pass
 )
 
 add_subdirectory(pio_usb)
+add_subdirectory(cdc_stdio_lib)
 
 target_link_libraries(hid_pass PRIVATE
     pico_stdlib
@@ -21,6 +22,7 @@ target_link_libraries(hid_pass PRIVATE
     tinyusb_device
     tinyusb_host
     tinyusb_board
+    cdc_stdio_lib
 )
 
 target_include_directories(hid_pass PRIVATE
