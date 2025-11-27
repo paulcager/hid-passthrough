@@ -4,7 +4,7 @@
 #include <string.h>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
-#include "bsp/board.h"
+#include "hardware/clocks.h"
 #include "pio_usb.h"
 #include "cdc_stdio_lib.h"
 
@@ -154,10 +154,17 @@ uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
 
 
 int main(void) {
-    board_init();
+    // default 125MHz is not appropriate for PIO. Sysclock should be multiple of 12MHz.
+    set_sys_clock_khz(120000, true);
 
-    // Initialize TinyUSB device stack before stdio
-    tusb_init();
+    sleep_ms(10);
+
+    // Launch core1 BEFORE initializing device stack (order matters!)
+    multicore_reset_core1();
+    multicore_launch_core1(core1_main);
+
+    // Initialize TinyUSB device stack on RHPORT0 (native USB)
+    tud_init(0);
 
     // Initialize USB CDC stdio (for debugging)
     cdc_stdio_lib_init();
@@ -171,8 +178,6 @@ int main(void) {
     printf("Core 0: USB Device (to host PC)\n");
     printf("Core 1: USB Host (from keyboard)\n");
     printf("===========================================\n\n");
-
-    multicore_launch_core1(core1_main);
 
     printf("Core 0: Starting device task loop\n");
 
@@ -202,6 +207,8 @@ void tud_resume_cb(void) {
 }
 
 void core1_main(void) {
+    sleep_ms(10);
+
     printf("Core 1: Initializing PIO-USB host\n");
 
     // Configure PIO-USB for host mode
@@ -292,7 +299,7 @@ void tud_hid_report_cb(uint8_t instance, uint8_t const* report, uint16_t len) {
     printf("HID report from host PC, len %d\n", len);
     hexdump(report, len);
     // Note: This would forward to physical keyboard if needed
-    // tuh_hid_set_report(1, 0, 0, HID_REPORT_TYPE_OUTPUT, report, len);
+    tuh_hid_set_report(1, 0, 0, HID_REPORT_TYPE_OUTPUT, report, len);
 }
 
 // TinyUSB Device HID callback: invoked when host PC sends SET_REPORT (e.g., LED state)

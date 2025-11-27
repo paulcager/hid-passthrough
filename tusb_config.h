@@ -8,17 +8,20 @@
 //--------------------------------------------------------------------
 // COMMON CONFIGURATION
 //--------------------------------------------------------------------
-#define CFG_TUSB_MCU OPT_MCU_RP2040
 #define CFG_TUSB_OS OPT_OS_PICO
 
-#define CFG_TUSB_RHPORT0_MODE (OPT_MODE_DEVICE)
-#define CFG_TUSB_RHPORT1_MODE (OPT_MODE_HOST)
+// Enable device and host stacks
+#define CFG_TUD_ENABLED 1
+#define CFG_TUH_ENABLED 1
+#define CFG_TUH_RPI_PIO_USB 1
+
+// Board-specific: don't use TinyUSB BSP board_init
+#define BOARD_TUH_RHPORT 1
+#define BOARD_TUH_MAX_SPEED OPT_MODE_DEFAULT_SPEED
 
 //--------------------------------------------------------------------
 // DEVICE CONFIGURATION
 //--------------------------------------------------------------------
-#define CFG_TUD_ENABLED 1
-#define CFG_TUD_MAX_SPEED TUSB_SPEED_FULL
 #define CFG_TUD_ENDPOINT0_SIZE 64
 
 //------------- CLASS -------------//
@@ -32,12 +35,14 @@
 //--------------------------------------------------------------------
 // HOST CONFIGURATION
 //--------------------------------------------------------------------
-#define CFG_TUH_ENABLED 1
-#define CFG_TUH_MAX_SPEED TUSB_SPEED_FULL
 #define CFG_TUH_ENUMERATION_BUFSIZE 256
 
-//------------- CLASS -------------//
-#define CFG_TUH_HID 4 // Number of HID interfaces to support
+#define CFG_TUH_HUB 1
+#define CFG_TUH_DEVICE_MAX (CFG_TUH_HUB ? 4 : 1)
+
+#define CFG_TUH_HID 4
+#define CFG_TUH_HID_EPIN_BUFSIZE 64
+#define CFG_TUH_HID_EPOUT_BUFSIZE 64
 
 #ifdef __cplusplus
  }
