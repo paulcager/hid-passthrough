@@ -93,7 +93,7 @@ uint8_t const desc_configuration[] = {
     TUD_CDC_DESCRIPTOR(0, 4, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 
     // Interface number, string index, protocol, report descriptor len, EP In address, size & polling interval
-    TUD_HID_DESCRIPTOR(2, 0, HID_ITF_PROTOCOL_NONE, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 10)
+    TUD_HID_DESCRIPTOR(2, 0, HID_ITF_PROTOCOL_KEYBOARD, sizeof(desc_hid_report), EPNUM_HID, CFG_TUD_HID_EP_BUFSIZE, 10)
 };
 
 // Invoked when received GET CONFIGURATION DESCRIPTOR
@@ -164,9 +164,17 @@ int main(void) {
 
     stdio_init_all();
 
-    printf("USB HID proxy\n");
+    printf("\n\n");
+    printf("===========================================\n");
+    printf("USB HID Passthrough (Minimal Test)\n");
+    printf("===========================================\n");
+    printf("Core 0: USB Device (to host PC)\n");
+    printf("Core 1: USB Host (from keyboard)\n");
+    printf("===========================================\n\n");
 
     multicore_launch_core1(core1_main);
+
+    printf("Core 0: Starting device task loop\n");
 
     while (true) {
         tud_task();
@@ -175,16 +183,40 @@ int main(void) {
     return 0;
 }
 
+// TinyUSB Device callbacks
+void tud_mount_cb(void) {
+    printf("Device: Mounted (connected to host PC)\n");
+}
+
+void tud_umount_cb(void) {
+    printf("Device: Unmounted (disconnected from host PC)\n");
+}
+
+void tud_suspend_cb(bool remote_wakeup_en) {
+    (void)remote_wakeup_en;
+    printf("Device: Suspended\n");
+}
+
+void tud_resume_cb(void) {
+    printf("Device: Resumed\n");
+}
+
 void core1_main(void) {
+    printf("Core 1: Initializing PIO-USB host\n");
+
     // Configure PIO-USB for host mode
     pio_usb_configuration_t pio_cfg = PIO_USB_DEFAULT_CONFIG;
     pio_cfg.pin_dp = host_pin_dp;
 
+    printf("Core 1: Configuring TinyUSB for PIO-USB on GPIO %d\n", host_pin_dp);
     // Configure TinyUSB to use PIO-USB
     tuh_configure(1, TUH_CFGID_RPI_PIO_USB_CONFIGURATION, &pio_cfg);
 
+    printf("Core 1: Initializing TinyUSB host stack\n");
     // Initialize TinyUSB host stack
     tuh_init(1);
+
+    printf("Core 1: Starting host task loop\n");
 
     while(true) {
         // Run TinyUSB host task (which handles PIO-USB internally)
@@ -196,10 +228,22 @@ void core1_main(void) {
 void tuh_hid_mount_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* desc_report, uint16_t desc_len) {
     (void)desc_report;
     (void)desc_len;
-    printf("HID device mounted: addr %d, instance %d\n", dev_addr, instance);
+
+    uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
+    printf("HID device mounted: addr %d, instance %d, protocol %d\n", dev_addr, instance, itf_protocol);
+
+    // If this is a keyboard, request boot protocol mode for simpler reports
+    if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD) {
+        printf("Setting boot protocol for keyboard\n");
+        if (!tuh_hid_set_protocol(dev_addr, instance, HID_PROTOCOL_BOOT)) {
+            printf("WARNING: Failed to set boot protocol\n");
+        }
+    }
 
     // Request to receive reports
-    tuh_hid_receive_report(dev_addr, instance);
+    if (!tuh_hid_receive_report(dev_addr, instance)) {
+        printf("ERROR: Failed to request initial report\n");
+    }
 }
 
 // TinyUSB Host HID callback: invoked when HID device is unmounted
@@ -209,11 +253,23 @@ void tuh_hid_umount_cb(uint8_t dev_addr, uint8_t instance) {
 
 // TinyUSB Host HID callback: invoked when HID report is received
 void tuh_hid_report_received_cb(uint8_t dev_addr, uint8_t instance, uint8_t const* report, uint16_t len) {
-    printf("HID report from device %d, instance %d, len %d\n", dev_addr, instance, len);
-    hexdump(report, len);
+    // Print raw report immediately (same format as hid-proxy for easy comparison)
+    uint8_t const itf_protocol = tuh_hid_interface_protocol(dev_addr, instance);
+    if (itf_protocol == HID_ITF_PROTOCOL_KEYBOARD && len >= 8) {
+        printf("USB_RX: [%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x]\n",
+               report[0], report[1], report[2], report[3],
+               report[4], report[5], report[6], report[7]);
+    } else {
+        printf("HID report from device %d, instance %d, len %d: ", dev_addr, instance, len);
+        hexdump(report, len);
+    }
 
-    // Forward report to USB device (to host PC)
-    tud_hid_report(0, report, len);
+    // Forward report to USB device (to host PC) only if ready
+    if (tud_hid_ready()) {
+        tud_hid_report(0, report, len);
+    } else {
+        printf("WARNING: Device HID not ready, dropping report\n");
+    }
 
     // Continue requesting reports
     tuh_hid_receive_report(dev_addr, instance);
